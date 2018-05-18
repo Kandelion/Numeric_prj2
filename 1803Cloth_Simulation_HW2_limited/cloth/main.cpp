@@ -160,8 +160,8 @@ float REST_LENGTH_DIAG;
 const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
-#define CPU 1
-#if CPU == 1
+#define CPU 2			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 #endif
@@ -223,7 +223,7 @@ void InitializeBuffers() {
     int buffer_size = NUM_PARTICLES_X * NUM_PARTICLES_Y;
     GLfloat* init_position = (GLfloat*)malloc(4 * buffer_size * sizeof(GLfloat));
     GLfloat* init_velocity = (GLfloat*)malloc(4 * buffer_size * sizeof(GLfloat));
-#if CPU == 1
+#if CPU != 0
 	//GLfloat* position = (GLfloat*)malloc(4 * buffer_size * sizeof(GLfloat));
 	//GLfloat* velocity = (GLfloat*)malloc(4 * buffer_size * sizeof(GLfloat));
 	memset(velocity, 0, 4 * buffer_size * sizeof(GLfloat));
@@ -253,7 +253,7 @@ void InitializeBuffers() {
             init_texcoord[tc_idx++] = ds * j;
             init_texcoord[tc_idx++] = dt * i;
 
-#if CPU == 1
+#if CPU != 0
 			pos_idx -= 4;
 			position[pos_idx++] = p.x;
 			position[pos_idx++] = p.y;
@@ -612,6 +612,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 				continue;
 			}
 
+#if CPU == 1
 			//Apply force
 			vel[pos_cnt] = vel_next[pos_cnt];
 			vel[pos_cnt + 1] = vel_next[pos_cnt + 1];
@@ -623,6 +624,21 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			pos[pos_cnt + 2] += vel_next[pos_cnt + 2] * DELTA_T;
 
 			pos_cnt += 4;
+#endif
+
+#if CPU == 2
+			//Apply force
+			vel[pos_cnt] = vel_next[pos_cnt];
+			vel[pos_cnt + 1] = vel_next[pos_cnt + 1];
+			vel[pos_cnt + 2] = vel_next[pos_cnt + 2];
+
+			//x, y, z, padding
+			pos[pos_cnt] += vel_next[pos_cnt] * DELTA_T + 0.5f * F[0] * PARTICLE_INV_MASS * DELTA_T * DELTA_T;
+			pos[pos_cnt + 1] += vel_next[pos_cnt + 1] * DELTA_T + 0.5f * F[1] * PARTICLE_INV_MASS * DELTA_T * DELTA_T;
+			pos[pos_cnt + 2] += vel_next[pos_cnt + 2] * DELTA_T + 0.5f * F[2] * PARTICLE_INV_MASS * DELTA_T * DELTA_T;
+
+			pos_cnt += 4;
+#endif
 		}
 	}
 
@@ -690,7 +706,7 @@ void display(void) {
     CHECK_ERROR_CODE(errcode_ret);
 
     clFinish(cmd_queue);
-    CHECK_TIME_END(compute_time);
+    //CHECK_TIME_END(compute_time);
 
     clFlush(cmd_queue);
     clFinish(cmd_queue);
@@ -701,7 +717,7 @@ void display(void) {
     errcode_ret = clEnqueueReleaseGLObjects(cmd_queue, 1, &buf_normal, 0, nullptr, nullptr);
     CHECK_ERROR_CODE(errcode_ret);
 
-    fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
+    //fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
 
     // run OpenGL
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -725,6 +741,11 @@ void display(void) {
     glUseProgram(0);
 
     glutSwapBuffers();
+
+	static int counts = 0;
+	counts++;
+	CHECK_TIME_END(compute_time);
+	fprintf(stdout, "     * Time by CL kernel = %.3fms, frame : %d\n\n", compute_time, counts);
 }
 
 void keyboard(unsigned char key, int x, int y) {
