@@ -1,2 +1,13 @@
 *.db
 *.pdb
+*.opendb
+*.log
+*.ipdb
+*.obj
+*.exe
+*.ilk
+*.idb
+*.iobj
+
+1803Cloth_Simulation_HW2_limited/x64/
+1803Cloth_Simulation_HW2_limited/cloth/x64/
