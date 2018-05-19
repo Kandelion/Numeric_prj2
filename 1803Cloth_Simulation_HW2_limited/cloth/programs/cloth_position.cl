@@ -1,6 +1,8 @@
 #define NUM_PARTICLES_X 64
 #define NUM_PARTICLES_Y 64
 
+#define GPU 1			//1 : First order, 2 : Cookbook, 3 : Runge Kutta
+
 void calcSpringForce(int x, int y, __global float4 *pos, float4 *result, float rh, float rv, float rd, float SPRING_K);
 inline void calcGravityForce(float4 *result, float PARTICLE_MASS, float GRAVITY);
 void calcDampingForce(int x, int y, __global float4 *vel, float4 *result, float DAMPING_CONST);
@@ -39,20 +41,21 @@ void cloth_position(
 	calcGravityForce(&F, ParticleMass, Gravity.y);
 	calcDampingForce(x, y, vel_in, &F, DampingConst);
 
-	////wind
-	///*if (flag == 1 && y > NUM_PARTICLES_Y * 0.1)
-	//{
-	//	F[2] += 15.0f;
-	//}*/
-
 	//Apply force
 	vel_out[idx] += F * ParticleInvMass * DeltaT;
 
 	//Apply force
 	vel_in[idx] = vel_out[idx];
 
+#if GPU == 1
 	//x, y, z, padding
 	pos_out[idx] = pos_in[idx] + vel_out[idx] * DeltaT;
+#endif
+
+#if GPU == 2
+	//x, y, z, padding
+	pos_out[idx] = pos_in[idx] + pos_in[idx] * DeltaT + 0.5f * F * ParticleInvMass * DeltaT * DeltaT;
+#endif
 }
 
 void calcSpringForce(int x, int y, __global float4 *pos, float4 *result, float rh, float rv, float rd, float SPRING_K) {
