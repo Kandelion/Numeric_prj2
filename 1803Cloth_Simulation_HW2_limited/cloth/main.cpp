@@ -160,7 +160,7 @@ float REST_LENGTH_DIAG;
 const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
-#define CPU 3			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#define CPU 1			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
 #if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
@@ -611,7 +611,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			//wind
 			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
 			{
-				F[2] += 10.0f;
+				F[2] += 15.0f;
 			}
 
 #if CPU != 3
@@ -677,7 +677,6 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			pos_cnt += 4;
 #endif
 
-
 #if CPU == 3
 			//x, y, z, padding
 			pos_mid[pos_cnt] += vel_mid[pos_cnt] * DELTA_T;
@@ -709,7 +708,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			//wind
 			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
 			{
-				F[2] += 10.0f;
+				F[2] += 15.0f;
 			}
 
 			vel_next[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
@@ -752,17 +751,19 @@ void display(void) {
     size_t global_work_size[3] = { NUM_PARTICLES_X, NUM_PARTICLES_Y, 0 };
     size_t local_work_size[3] = { WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 0 };
 
-
+#if CPU != 0
 	int buffer_size = NUM_PARTICLES_X * NUM_PARTICLES_Y;
 	// Position, Velocity 계산 (실제로 구현해야 할 부분)
 	CHECK_TIME_START;
-	CalcPosition(position, velocity);
+	for(int i=0; i<NUM_ITER; i++)
+		CalcPosition(position, velocity);
 
 	// Position, Velocity 데이터 넘김 (CPU -> GPU)
 	glBindBuffer(GL_ARRAY_BUFFER, loc_curr_pos);
 	glBufferData(GL_ARRAY_BUFFER, 4 * buffer_size * sizeof(GLfloat), &position[0], GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, loc_curr_vel);
 	glBufferData(GL_ARRAY_BUFFER, 4 * buffer_size * sizeof(GLfloat), &velocity[0], GL_DYNAMIC_COPY);
+#endif
 
     // run OpenCL kernel
     glFlush();
@@ -774,7 +775,7 @@ void display(void) {
     errcode_ret = clEnqueueAcquireGLObjects(cmd_queue, 1, &buf_normal, 0, nullptr, nullptr);
     CHECK_ERROR_CODE(errcode_ret);
     
-
+#if CPU == 0
     for (int i = 0; i < NUM_ITER; i++) {
         errcode_ret  = clSetKernelArg(kernel[0], 0, sizeof(cl_mem), &buf_pos[read_buf]);
         errcode_ret |= clSetKernelArg(kernel[0], 1, sizeof(cl_mem), &buf_pos[1-read_buf]);
@@ -797,6 +798,8 @@ void display(void) {
         CHECK_ERROR_CODE(errcode_ret);
         clFinish(cmd_queue);
     }
+#endif
+
     errcode_ret  = clSetKernelArg(kernel[1], 0, sizeof(cl_mem), &buf_pos[0]);
     errcode_ret |= clSetKernelArg(kernel[1], 1, sizeof(cl_mem), &buf_normal);
     errcode_ret |= clSetKernelArg(kernel[1], 2, 4 * (WORKGROUP_SIZE_X + 2) * (WORKGROUP_SIZE_Y + 2) * sizeof(float), NULL);
@@ -805,7 +808,7 @@ void display(void) {
     CHECK_ERROR_CODE(errcode_ret);
 
     clFinish(cmd_queue);
-    //CHECK_TIME_END(compute_time);
+    CHECK_TIME_END(compute_time);
 
     clFlush(cmd_queue);
     clFinish(cmd_queue);
@@ -816,7 +819,9 @@ void display(void) {
     errcode_ret = clEnqueueReleaseGLObjects(cmd_queue, 1, &buf_normal, 0, nullptr, nullptr);
     CHECK_ERROR_CODE(errcode_ret);
 
-    //fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
+	static unsigned int cnt = 0;
+	cnt++;
+    fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2f s)\n\n", compute_time, cnt, (float)cnt / (NUM_ITER * 60.0f));
 
     // run OpenGL
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -840,11 +845,6 @@ void display(void) {
     glUseProgram(0);
 
     glutSwapBuffers();
-
-	static unsigned int counts = 0;
-	counts++;
-	CHECK_TIME_END(compute_time);
-	fprintf(stdout, "     * Time by CL kernel = %.3fms, frame : %u\n\n", compute_time, counts);
 }
 
 void keyboard(unsigned char key, int x, int y) {
