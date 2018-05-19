@@ -160,7 +160,7 @@ float REST_LENGTH_DIAG;
 const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
-#define CPU 2			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#define CPU 3			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
 #if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
@@ -575,9 +575,25 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 
 	GLfloat *vel_next = (GLfloat*)malloc(4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
 	memcpy(vel_next, vel, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+#if CPU == 3
+	GLfloat *pos_mid = (GLfloat*)malloc(4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+	memcpy(pos_mid, pos, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+	GLfloat *vel_mid = (GLfloat*)malloc(4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+	memcpy(vel_mid, vel, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+	GLfloat *acc_mid = (GLfloat*)malloc(4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+	memset(acc_mid, 0, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+#endif
 
-	for (int i = 0; i < NUM_PARTICLES_Y; i++)
-	{
+	//for wind
+	static int count = 0;
+	count++;
+	int flag = 0;
+	if (count % (NUM_ITER * 60 * 5) == 0) {
+		flag = 1;
+		count = 0;
+	}
+
+	for (int i = 0; i < NUM_PARTICLES_Y; i++) {
 		for (int j = 0; j < NUM_PARTICLES_X; j++) {
 			//고정된 점
 			if (i == NUM_PARTICLES_Y - 1 && ((j == NUM_PARTICLES_X - 1) || j % (NUM_PARTICLES_X / 4) == 0))
@@ -592,18 +608,39 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			calcGravityForce(F);
 			calcDampingForce(j, i, vel, F);
 
+			//wind
+			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
+			{
+				F[2] += 10.0f;
+			}
+
+#if CPU != 3
 			//Apply force
 			vel_next[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
 			vel_next[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T;
 			vel_next[pos_cnt + 2] += F[2] * PARTICLE_INV_MASS * DELTA_T;
 
 			pos_cnt += 4;
+#endif
+
+#if CPU == 3
+			//Apply force
+			vel_mid[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
+			vel_mid[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T;
+			vel_mid[pos_cnt + 2] += F[2] * PARTICLE_INV_MASS * DELTA_T;
+
+			//save force
+			acc_mid[pos_cnt] = F[0] * PARTICLE_INV_MASS;
+			acc_mid[pos_cnt + 1] = F[1] * PARTICLE_INV_MASS;
+			acc_mid[pos_cnt + 2] = F[2] * PARTICLE_INV_MASS;
+
+			pos_cnt += 4;
+#endif
 		}
 	}
 
 	pos_cnt = 0;
-	for (int i = 0; i < NUM_PARTICLES_Y; i++)
-	{
+	for (int i = 0; i < NUM_PARTICLES_Y; i++) {
 		for (int j = 0; j < NUM_PARTICLES_X; j++) {
 			//고정된 점
 			if (i == NUM_PARTICLES_Y-1 && ((j == NUM_PARTICLES_X - 1) || j % (NUM_PARTICLES_X / 4) == 0))
@@ -639,8 +676,70 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 
 			pos_cnt += 4;
 #endif
+
+
+#if CPU == 3
+			//x, y, z, padding
+			pos_mid[pos_cnt] += vel_mid[pos_cnt] * DELTA_T;
+			pos_mid[pos_cnt + 1] += vel_mid[pos_cnt + 1] * DELTA_T;
+			pos_mid[pos_cnt + 2] += vel_mid[pos_cnt + 2] * DELTA_T;
+
+			pos_cnt += 4;
+#endif
 		}
 	}
+
+#if CPU == 3
+	pos_cnt = 0;
+	for (int i = 0; i < NUM_PARTICLES_Y; i++) {
+		for (int j = 0; j < NUM_PARTICLES_X; j++) {
+			//고정된 점
+			if (i == NUM_PARTICLES_Y - 1 && ((j == NUM_PARTICLES_X - 1) || j % (NUM_PARTICLES_X / 4) == 0))
+			{
+				pos_cnt += 4;
+				continue;
+			}
+
+			//CalcForce
+			F[0] = 0; F[1] = 0; F[2] = 0;
+			calcSpringForce(j, i, pos_mid, vel_mid, F);
+			calcGravityForce(F);
+			calcDampingForce(j, i, vel_mid, F);
+
+			//wind
+			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
+			{
+				F[2] += 10.0f;
+			}
+
+			vel_next[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
+			vel_next[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T;
+			vel_next[pos_cnt + 2] += F[2] * PARTICLE_INV_MASS * DELTA_T;
+
+			//calc avg velocity
+			vel[pos_cnt] = 0.5f * (vel_next[pos_cnt] + vel_mid[pos_cnt]);
+			vel[pos_cnt + 1] = 0.5f * (vel_next[pos_cnt + 1] + vel_mid[pos_cnt + 1]);
+			vel[pos_cnt + 2] = 0.5f * (vel_next[pos_cnt + 2] + vel_mid[pos_cnt + 2]);
+
+			//calc avg acceleration
+			acc_mid[pos_cnt] = 0.5f * (acc_mid[pos_cnt] + (F[0] * PARTICLE_INV_MASS));
+			acc_mid[pos_cnt + 1] = 0.5f * (acc_mid[pos_cnt + 1] + (F[1] * PARTICLE_INV_MASS));
+			acc_mid[pos_cnt + 2] = 0.5f * (acc_mid[pos_cnt + 2] + (F[2] * PARTICLE_INV_MASS));
+
+			//calc position
+			pos[pos_cnt] += vel[pos_cnt] * DELTA_T;
+			pos[pos_cnt + 1] += vel[pos_cnt + 1] * DELTA_T;
+			pos[pos_cnt + 2] += vel[pos_cnt + 2] * DELTA_T;
+
+			//calc velocity
+			vel[pos_cnt] += acc_mid[pos_cnt] * DELTA_T;
+			vel[pos_cnt + 1] += acc_mid[pos_cnt + 1] * DELTA_T;
+			vel[pos_cnt + 2] += acc_mid[pos_cnt + 2] * DELTA_T;
+
+			pos_cnt += 4;
+		}
+	}
+#endif
 
 	free(vel_next);
 }
@@ -742,10 +841,10 @@ void display(void) {
 
     glutSwapBuffers();
 
-	static int counts = 0;
+	static unsigned int counts = 0;
 	counts++;
 	CHECK_TIME_END(compute_time);
-	fprintf(stdout, "     * Time by CL kernel = %.3fms, frame : %d\n\n", compute_time, counts);
+	fprintf(stdout, "     * Time by CL kernel = %.3fms, frame : %u\n\n", compute_time, counts);
 }
 
 void keyboard(unsigned char key, int x, int y) {
