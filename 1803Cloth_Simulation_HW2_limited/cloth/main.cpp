@@ -160,7 +160,7 @@ float REST_LENGTH_DIAG;
 const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
-#define CPU 1			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#define CPU 0			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
 #if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
@@ -776,6 +776,7 @@ void display(void) {
     CHECK_ERROR_CODE(errcode_ret);
     
 #if CPU == 0
+	CHECK_TIME_START;
     for (int i = 0; i < NUM_ITER; i++) {
         errcode_ret  = clSetKernelArg(kernel[0], 0, sizeof(cl_mem), &buf_pos[read_buf]);
         errcode_ret |= clSetKernelArg(kernel[0], 1, sizeof(cl_mem), &buf_pos[1-read_buf]);
@@ -790,7 +791,7 @@ void display(void) {
         errcode_ret |= clSetKernelArg(kernel[0], 10, sizeof(float), &REST_LENGTH_VERT);
         errcode_ret |= clSetKernelArg(kernel[0], 11, sizeof(float), &REST_LENGTH_DIAG);
         errcode_ret |= clSetKernelArg(kernel[0], 12, sizeof(float), &DELTA_T);
-        errcode_ret |= clSetKernelArg(kernel[0], 13, sizeof(float), &DAMPING_CONST);
+		errcode_ret |= clSetKernelArg(kernel[0], 13, sizeof(float), &DAMPING_CONST);
         CHECK_ERROR_CODE(errcode_ret);
         read_buf = 1 - read_buf;
 
@@ -819,9 +820,12 @@ void display(void) {
     errcode_ret = clEnqueueReleaseGLObjects(cmd_queue, 1, &buf_normal, 0, nullptr, nullptr);
     CHECK_ERROR_CODE(errcode_ret);
 
-	static unsigned int cnt = 0;
+	/*static unsigned int cnt = 0;
+	static float elapsed = 0.0f;
 	cnt++;
-    fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2f s)\n\n", compute_time, cnt, (float)cnt / (NUM_ITER * 60.0f));
+	elapsed += compute_time;*/
+    //fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2fs), elapsed = %.2fs\n\n", compute_time, cnt, (float)cnt / (60.0f), elapsed/1000.0f);
+	fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
 
     // run OpenGL
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
