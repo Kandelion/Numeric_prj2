@@ -1,7 +1,7 @@
-#define NUM_PARTICLES_X 64
+Ôªø#define NUM_PARTICLES_X 64
 #define NUM_PARTICLES_Y 64
 
-#define GPU 1			//1 : First order, 2 : Cookbook, 3 : Runge Kutta
+#define GPU 3			//1 : First order, 2 : Cookbook, 3 : Runge Kutta
 
 void calcSpringForce(int x, int y, __global float4 *pos, float4 *result, float rh, float rv, float rd, float SPRING_K);
 inline void calcGravityForce(float4 *result, float PARTICLE_MASS, float GRAVITY);
@@ -26,9 +26,9 @@ void cloth_position(
 	int y = idx / NUM_PARTICLES_X;
 	int x = idx % NUM_PARTICLES_X;
 
-	float4 F;
+	float4 F, pos_mid, vel_mid, acc_mid;
 
-	//∞Ì¡§µ» ¡°
+	//Í≥†Ï†ïÎêú Ï†ê
 	if (y == NUM_PARTICLES_Y - 1 && ((x == NUM_PARTICLES_X - 1) || x % (NUM_PARTICLES_X / 4) == 0))
 	{
 		pos_out[idx] = pos_in[idx];
@@ -41,20 +41,48 @@ void cloth_position(
 	calcGravityForce(&F, ParticleMass, Gravity.y);
 	calcDampingForce(x, y, vel_in, &F, DampingConst);
 
+#if GPU == 1
 	//Apply force
 	vel_out[idx] += F * ParticleInvMass * DeltaT;
-
 	//Apply force
 	vel_in[idx] = vel_out[idx];
-
-#if GPU == 1
 	//x, y, z, padding
 	pos_out[idx] = pos_in[idx] + vel_out[idx] * DeltaT;
 #endif
 
 #if GPU == 2
+	//Apply force
+	vel_out[idx] += F * ParticleInvMass * DeltaT;
+	//Apply force
+	vel_in[idx] = vel_out[idx];
 	//x, y, z, padding
-	pos_out[idx] = pos_in[idx] + pos_in[idx] * DeltaT + 0.5f * F * ParticleInvMass * DeltaT * DeltaT;
+	pos_out[idx] = pos_in[idx] + vel_in[idx] * DeltaT + 0.5f * F * ParticleInvMass * DeltaT * DeltaT;
+#endif
+
+#if GPU == 3
+	vel_mid = vel_in[idx] + F * ParticleInvMass * DeltaT;
+	pos_mid = pos_in[idx] + vel_mid * DeltaT;
+	acc_mid = F * ParticleInvMass;
+
+	pos_out[idx] = pos_mid;
+	vel_out[idx] = vel_mid;
+
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	//CalcForce
+	F.x = 0; F.y = 0; F.z = 0;
+	calcSpringForce(x, y, pos_out, &F, RestLengthHoriz, RestLengthVert, RestLengthDiag, SpringK);
+	calcGravityForce(&F, ParticleMass, Gravity.y);
+	calcDampingForce(x, y, vel_out, &F, DampingConst);
+
+	acc_mid = 0.5f * (acc_mid + F * ParticleInvMass);
+	vel_mid = 0.5f * (vel_mid + vel_out[idx]);
+
+	vel_out[idx] = vel_in[idx] + acc_mid * DeltaT;
+	pos_out[idx] = pos_in[idx] + vel_mid * DeltaT;
+
+	//Apply force
+	vel_in[idx] = vel_out[idx];
 #endif
 }
 
