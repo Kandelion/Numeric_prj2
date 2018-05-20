@@ -161,7 +161,7 @@ const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
 #define WIND 0
-#define CPU 3			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#define CPU 0			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
 #if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
@@ -518,7 +518,7 @@ void FinalizeOpenGL(void) {
     glDeleteTextures(N_TEXTURES_USED, texture_names);
 }
 
-void calcSpringForce(int x, int y, const GLfloat *pos, const GLfloat *vel, GLfloat *result) {
+void calcSpringForce(int x, int y, const GLfloat *pos, GLfloat *result) {
 	float r[3] = { 0 };
 	float abs_r = 0.0f;
 	float distance;
@@ -609,7 +609,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 
 			//CalcForce
 			F[0] = 0; F[1] = 0; F[2] = 0;
-			calcSpringForce(j, i, pos, vel, F);
+			calcSpringForce(j, i, pos, F);
 			calcGravityForce(F);
 			calcDampingForce(j, i, vel, F);
 
@@ -663,9 +663,9 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			vel[pos_cnt + 2] = vel_next[pos_cnt + 2];
 
 			//x, y, z, padding
-			pos[pos_cnt] += vel_next[pos_cnt] * DELTA_T;
-			pos[pos_cnt + 1] += vel_next[pos_cnt + 1] * DELTA_T;
-			pos[pos_cnt + 2] += vel_next[pos_cnt + 2] * DELTA_T;
+			pos[pos_cnt] += vel[pos_cnt] * DELTA_T;
+			pos[pos_cnt + 1] += vel[pos_cnt + 1] * DELTA_T;
+			pos[pos_cnt + 2] += vel[pos_cnt + 2] * DELTA_T;
 
 			pos_cnt += 4;
 #endif
@@ -708,7 +708,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 
 			//CalcForce
 			F[0] = 0; F[1] = 0; F[2] = 0;
-			calcSpringForce(j, i, pos_mid, vel_mid, F);
+			calcSpringForce(j, i, pos_mid, F);
 			calcGravityForce(F);
 			calcDampingForce(j, i, vel_mid, F);
 
@@ -770,9 +770,13 @@ void display(void) {
 	int buffer_size = NUM_PARTICLES_X * NUM_PARTICLES_Y;
 	// Position, Velocity 계산 (실제로 구현해야 할 부분)
 	CHECK_TIME_START;
-	if (cnt < 600) {
+	if (cnt < 600 /** NUM_ITER*/) {
 		for (int i = 0; i < NUM_ITER; i++)
+			//CHECK_TIME_START;
 			CalcPosition(position, velocity);
+			//CHECK_TIME_END(compute_time);
+			//cnt++;
+			//elapsed += compute_time;
 	}
 
 	// Position, Velocity 데이터 넘김 (CPU -> GPU)
@@ -794,28 +798,30 @@ void display(void) {
     
 #if CPU == 0
 	CHECK_TIME_START;
-    for (int i = 0; i < NUM_ITER; i++) {
-        errcode_ret  = clSetKernelArg(kernel[0], 0, sizeof(cl_mem), &buf_pos[read_buf]);
-        errcode_ret |= clSetKernelArg(kernel[0], 1, sizeof(cl_mem), &buf_pos[1-read_buf]);
-        errcode_ret |= clSetKernelArg(kernel[0], 2, sizeof(cl_mem), &buf_vel[read_buf]);
-        errcode_ret |= clSetKernelArg(kernel[0], 3, sizeof(cl_mem), &buf_vel[1-read_buf]);
-        errcode_ret |= clSetKernelArg(kernel[0], 4, 4 * (WORKGROUP_SIZE_X + 2) * (WORKGROUP_SIZE_Y + 2) * sizeof(float), NULL);
-        errcode_ret |= clSetKernelArg(kernel[0], 5, 4 * sizeof(float), GRAVITY);
-        errcode_ret |= clSetKernelArg(kernel[0], 6, sizeof(float), &PARTICLE_MASS);
-        errcode_ret |= clSetKernelArg(kernel[0], 7, sizeof(float), &PARTICLE_INV_MASS);
-        errcode_ret |= clSetKernelArg(kernel[0], 8, sizeof(float), &SPRING_K);
-        errcode_ret |= clSetKernelArg(kernel[0], 9, sizeof(float), &REST_LENGTH_HORIZ);
-        errcode_ret |= clSetKernelArg(kernel[0], 10, sizeof(float), &REST_LENGTH_VERT);
-        errcode_ret |= clSetKernelArg(kernel[0], 11, sizeof(float), &REST_LENGTH_DIAG);
-        errcode_ret |= clSetKernelArg(kernel[0], 12, sizeof(float), &NUM_ITER);
-		errcode_ret |= clSetKernelArg(kernel[0], 13, sizeof(float), &DAMPING_CONST);
-        CHECK_ERROR_CODE(errcode_ret);
-        read_buf = 1 - read_buf;
+	if (cnt < 600) {
+		for (int i = 0; i < NUM_ITER; i++) {
+			errcode_ret = clSetKernelArg(kernel[0], 0, sizeof(cl_mem), &buf_pos[read_buf]);
+			errcode_ret |= clSetKernelArg(kernel[0], 1, sizeof(cl_mem), &buf_pos[1 - read_buf]);
+			errcode_ret |= clSetKernelArg(kernel[0], 2, sizeof(cl_mem), &buf_vel[read_buf]);
+			errcode_ret |= clSetKernelArg(kernel[0], 3, sizeof(cl_mem), &buf_vel[1 - read_buf]);
+			errcode_ret |= clSetKernelArg(kernel[0], 4, 4 * (WORKGROUP_SIZE_X + 2) * (WORKGROUP_SIZE_Y + 2) * sizeof(float), NULL);
+			errcode_ret |= clSetKernelArg(kernel[0], 5, 4 * sizeof(float), GRAVITY);
+			errcode_ret |= clSetKernelArg(kernel[0], 6, sizeof(float), &PARTICLE_MASS);
+			errcode_ret |= clSetKernelArg(kernel[0], 7, sizeof(float), &PARTICLE_INV_MASS);
+			errcode_ret |= clSetKernelArg(kernel[0], 8, sizeof(float), &SPRING_K);
+			errcode_ret |= clSetKernelArg(kernel[0], 9, sizeof(float), &REST_LENGTH_HORIZ);
+			errcode_ret |= clSetKernelArg(kernel[0], 10, sizeof(float), &REST_LENGTH_VERT);
+			errcode_ret |= clSetKernelArg(kernel[0], 11, sizeof(float), &REST_LENGTH_DIAG);
+			errcode_ret |= clSetKernelArg(kernel[0], 12, sizeof(int), &NUM_ITER);
+			errcode_ret |= clSetKernelArg(kernel[0], 13, sizeof(float), &DAMPING_CONST);
+			CHECK_ERROR_CODE(errcode_ret);
+			read_buf = 1 - read_buf;
 
-        errcode_ret = clEnqueueNDRangeKernel(cmd_queue, kernel[0], 2, nullptr, global_work_size, local_work_size, 0, nullptr, nullptr);
-        CHECK_ERROR_CODE(errcode_ret);
-        clFinish(cmd_queue);
-    }
+			errcode_ret = clEnqueueNDRangeKernel(cmd_queue, kernel[0], 2, nullptr, global_work_size, local_work_size, 0, nullptr, nullptr);
+			CHECK_ERROR_CODE(errcode_ret);
+			clFinish(cmd_queue);
+		}
+	}
 #endif
 
     errcode_ret  = clSetKernelArg(kernel[1], 0, sizeof(cl_mem), &buf_pos[0]);
@@ -839,11 +845,12 @@ void display(void) {
 
 	cnt++;
 	elapsed += compute_time;
-	if(cnt<600)
-		fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2fs), avg = %.2fs\n\n", compute_time, cnt, (float)cnt / (60.0f), elapsed/(float)cnt);
-	//fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
-	else if (cnt == 600) {
+	if(cnt<600 /** NUM_ITER*/)
+		fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2fs), avg = %.2fms\n\n", compute_time, cnt, (float)cnt / (60.0f), elapsed/(float)cnt);
+		//fprintf(stdout, "     * frame = %u(%.2fs), Time_AVG(Delta T) = %.2fms\n\n", cnt / NUM_ITER, (float)cnt / (60.0f * NUM_ITER), elapsed / (float)cnt);
+	else if (cnt == 600 /** NUM_ITER*/) {
 		fprintf(stdout, " *** 10sec elapsed. ***\n");
+		cnt++;
 	}
 
     // run OpenGL

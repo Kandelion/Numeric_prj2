@@ -21,7 +21,7 @@ void cloth_position(
 	float RestLengthHoriz,
 	float RestLengthVert,
 	float RestLengthDiag,
-	float NUM_ITER,
+	int NUM_ITER,
 	float DampingConst) {
 #if GPU == 3 || GPU == 6
 	float DeltaT = (1.0f / (NUM_ITER * 2))*(1.0f / 60.0f);
@@ -31,6 +31,7 @@ void cloth_position(
 
 #if GPU < 4
 	int idx = get_global_id(0) + get_global_size(0) * get_global_id(1);
+	int idx_loc = (get_local_id(1) + 1) * (get_local_size(0) + 2) + (get_local_id(0) + 1);
 
 	int y = idx / NUM_PARTICLES_X;
 	int x = idx % NUM_PARTICLES_X;
@@ -75,8 +76,16 @@ void cloth_position(
 
 	pos_out[idx] = pos_mid;
 	vel_out[idx] = vel_mid;
+	local_data[idx_loc] = pos_out[idx];
 
-	barrier(CLK_GLOBAL_MEM_FENCE);
+	barrier(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE);
+
+	pos_out[idx] = local_data[idx_loc];
+
+	if (y == NUM_PARTICLES_Y - 1 && ((x == NUM_PARTICLES_X - 1) || x % (NUM_PARTICLES_X / 4) == 0))
+	{
+		return;
+	}
 
 	//CalcForce
 	F.x = 0; F.y = 0; F.z = 0;
