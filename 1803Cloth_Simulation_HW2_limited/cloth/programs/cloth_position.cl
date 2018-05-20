@@ -21,8 +21,14 @@ void cloth_position(
 	float RestLengthHoriz,
 	float RestLengthVert,
 	float RestLengthDiag,
-	float DeltaT,
+	float NUM_ITER,
 	float DampingConst) {
+#if GPU == 3 || GPU == 6
+	float DeltaT = (1.0f / (NUM_ITER * 2))*(1.0f / 60.0f);
+#else
+	float DeltaT = (1.0f / NUM_ITER)*(1.0f / 60.0f);
+#endif
+
 #if GPU < 4
 	int idx = get_global_id(0) + get_global_size(0) * get_global_id(1);
 

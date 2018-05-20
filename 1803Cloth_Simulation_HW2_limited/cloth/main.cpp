@@ -160,7 +160,8 @@ float REST_LENGTH_DIAG;
 const float GRAVITY[4] = { 0, -9.80665 , 0 };
 const float DAMPING_CONST = 0.01;
 
-#define CPU 0			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
+#define WIND 0
+#define CPU 3			// 0 : GPU, 1 : First-Order, 2 : Cookbook, 3 : Runge-Kutta, 4 : Fortran
 #if CPU != 0
 GLfloat position[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
 GLfloat velocity[NUM_PARTICLES_X * NUM_PARTICLES_Y * 4 * 4];
@@ -582,8 +583,11 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 	memcpy(vel_mid, vel, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
 	GLfloat *acc_mid = (GLfloat*)malloc(4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
 	memset(acc_mid, 0, 4 * NUM_PARTICLES_X * NUM_PARTICLES_Y * sizeof(GLfloat));
+
+	DELTA_T = (1.0f / (NUM_ITER * 2))*(1.0f / 60.0f);
 #endif
 
+#if WIND == 1
 	//for wind
 	static int count = 0;
 	count++;
@@ -592,6 +596,7 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 		flag = 1;
 		count = 0;
 	}
+#endif
 
 	for (int i = 0; i < NUM_PARTICLES_Y; i++) {
 		for (int j = 0; j < NUM_PARTICLES_X; j++) {
@@ -608,11 +613,13 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			calcGravityForce(F);
 			calcDampingForce(j, i, vel, F);
 
+#if WIND == 1
 			//wind
 			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
 			{
 				F[2] += 15.0f;
 			}
+#endif
 
 #if CPU != 3
 			//Apply force
@@ -625,9 +632,9 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 
 #if CPU == 3
 			//Apply force
-			vel_mid[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
-			vel_mid[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T;
-			vel_mid[pos_cnt + 2] += F[2] * PARTICLE_INV_MASS * DELTA_T;
+			vel_mid[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T * 0.5f;
+			vel_mid[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T * 0.5f;
+			vel_mid[pos_cnt + 2] += F[2] * PARTICLE_INV_MASS * DELTA_T * 0.5f;
 
 			//save force
 			acc_mid[pos_cnt] = F[0] * PARTICLE_INV_MASS;
@@ -705,11 +712,13 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			calcGravityForce(F);
 			calcDampingForce(j, i, vel_mid, F);
 
+#if WIND == 1
 			//wind
 			if (flag == 1 && i > NUM_PARTICLES_Y * 0.1)
 			{
 				F[2] += 15.0f;
 			}
+#endif
 
 			vel_next[pos_cnt] += F[0] * PARTICLE_INV_MASS * DELTA_T;
 			vel_next[pos_cnt + 1] += F[1] * PARTICLE_INV_MASS * DELTA_T;
@@ -738,6 +747,10 @@ void CalcPosition(GLfloat *pos, GLfloat *vel) {
 			pos_cnt += 4;
 		}
 	}
+	free(vel_mid);
+	free(pos_mid);
+	free(acc_mid);
+	DELTA_T = (1.0f / NUM_ITER)*(1.0f / 60.0f);
 #endif
 
 	free(vel_next);
@@ -747,6 +760,8 @@ void display(void) {
     cl_int errcode_ret;
     float compute_time;
     int read_buf = 0;
+	static unsigned int cnt = 0;
+	static float elapsed = 0.0f;
 
     size_t global_work_size[3] = { NUM_PARTICLES_X, NUM_PARTICLES_Y, 0 };
     size_t local_work_size[3] = { WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 0 };
@@ -755,8 +770,10 @@ void display(void) {
 	int buffer_size = NUM_PARTICLES_X * NUM_PARTICLES_Y;
 	// Position, Velocity 계산 (실제로 구현해야 할 부분)
 	CHECK_TIME_START;
-	for(int i=0; i<NUM_ITER; i++)
-		CalcPosition(position, velocity);
+	if (cnt < 600) {
+		for (int i = 0; i < NUM_ITER; i++)
+			CalcPosition(position, velocity);
+	}
 
 	// Position, Velocity 데이터 넘김 (CPU -> GPU)
 	glBindBuffer(GL_ARRAY_BUFFER, loc_curr_pos);
@@ -790,7 +807,7 @@ void display(void) {
         errcode_ret |= clSetKernelArg(kernel[0], 9, sizeof(float), &REST_LENGTH_HORIZ);
         errcode_ret |= clSetKernelArg(kernel[0], 10, sizeof(float), &REST_LENGTH_VERT);
         errcode_ret |= clSetKernelArg(kernel[0], 11, sizeof(float), &REST_LENGTH_DIAG);
-        errcode_ret |= clSetKernelArg(kernel[0], 12, sizeof(float), &DELTA_T);
+        errcode_ret |= clSetKernelArg(kernel[0], 12, sizeof(float), &NUM_ITER);
 		errcode_ret |= clSetKernelArg(kernel[0], 13, sizeof(float), &DAMPING_CONST);
         CHECK_ERROR_CODE(errcode_ret);
         read_buf = 1 - read_buf;
@@ -820,12 +837,14 @@ void display(void) {
     errcode_ret = clEnqueueReleaseGLObjects(cmd_queue, 1, &buf_normal, 0, nullptr, nullptr);
     CHECK_ERROR_CODE(errcode_ret);
 
-	/*static unsigned int cnt = 0;
-	static float elapsed = 0.0f;
 	cnt++;
-	elapsed += compute_time;*/
-    //fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2fs), elapsed = %.2fs\n\n", compute_time, cnt, (float)cnt / (60.0f), elapsed/1000.0f);
-	fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
+	elapsed += compute_time;
+	if(cnt<600)
+		fprintf(stdout, "     * Time by CL kernel = %.3fms, frame = %u(%.2fs), avg = %.2fs\n\n", compute_time, cnt, (float)cnt / (60.0f), elapsed/(float)cnt);
+	//fprintf(stdout, "     * Time by CL kernel = %.3fms\n\n", compute_time);
+	else if (cnt == 600) {
+		fprintf(stdout, " *** 10sec elapsed. ***\n");
+	}
 
     // run OpenGL
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
